@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(./**)",
+      "Write(./**)",
+      "Bash(make *)",
+      "Bash(git *)",
+      "Bash(shellcheck *)",
+      "Bash(ostree *)",
+      "Bash(aarch64-linux-gnu-*)",
+      "Bash(docker run *)",
+      "Bash(python3 *)",
+      "Bash(ruff *)",
+      "Bash(cat *)",
+      "Bash(ls *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(diff *)",
+      "Bash(file *)",
+      "Bash(stat *)",
+      "Bash(du *)",
+      "Bash(tree *)"
+    ],
+    "deny": [
+      "Write(~/flipper-one-dev/repos/**)",
+      "Bash(rm -rf /)",
+      "Bash(sudo rm *)",
+      "Bash(dd if=* of=/dev/sd*)",
+      "Bash(dd if=* of=/dev/mmcblk*)"
+    ]
+  }
+}
