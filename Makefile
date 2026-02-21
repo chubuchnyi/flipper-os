@@ -12,9 +12,8 @@ help: ## Show this help
 rootfs: ## Build OSTree-ready rootfs (requires sudo)
 	sudo ./build/build-rootfs.sh
 
-image: ## Build full disk image (BOARD=rock-4d)
-	@echo "Building image for $(BOARD)..."
-	./build/build-image.sh $(BOARD)
+image: ## Build full disk image (BOARD=rock-4d, requires sudo)
+	sudo ./build/build-image.sh $(BOARD)
 
 ostree-commit: ## Generate OSTree commit from rootfs
 	./build/ostree-commit.sh
