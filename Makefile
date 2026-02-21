@@ -1,4 +1,4 @@
-.PHONY: help image ostree-commit profile-test rauc-bundle flash lint test clean
+.PHONY: help rootfs image ostree-commit profile-test rauc-bundle flash lint test clean
 
 SHELL := /bin/bash
 FLIPPER_DEV ?= $(HOME)/flipper-one-dev
@@ -8,6 +8,9 @@ OSTREE_REPO ?= $(FLIPPER_DEV)/ostree-work/repo
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+rootfs: ## Build OSTree-ready rootfs (requires sudo)
+	sudo ./build/build-rootfs.sh
 
 image: ## Build full disk image (BOARD=rock-4d)
 	@echo "Building image for $(BOARD)..."
@@ -26,7 +29,7 @@ flash: ## Flash image to board via Maskrom (BOARD=rock-4d)
 	./build/flash-board.sh $(BOARD)
 
 lint: ## Run linters on all code
-	shellcheck build/*.sh profiles/cli/*.sh initramfs/*.sh 2>/dev/null || true
+	shellcheck build/*.sh build/lib/*.sh profiles/cli/*.sh initramfs/*.sh 2>/dev/null || true
 	find . -name '*.py' | xargs ruff check 2>/dev/null || true
 
 test: ## Run integration tests
