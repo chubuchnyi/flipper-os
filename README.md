@@ -111,6 +111,35 @@ make profile-test BOARD=rock-4d    # Profile system test
 
 The output image is at `$FLIPPER_DEV/images/flipper-os-rock-4d.img`.
 
+### Docker (Zero-Setup)
+
+Build and try Flipper OS without installing any dependencies on your host:
+
+```bash
+# Build the Docker image (installs deps + clones repos; ~20 min, cached)
+docker build -t flipper-os .
+
+# Full pipeline: build kernel → rootfs → image → run tests → interactive QEMU
+docker run --privileged -it flipper-os
+
+# Or just launch QEMU (after a previous full run)
+docker run --privileged -it flipper-os qemu
+
+# Drop into a shell for manual exploration
+docker run --privileged -it flipper-os shell
+```
+
+> **Note:** `--privileged` is required for `losetup`, `mount`, `chroot`, and `binfmt_misc`
+> (cross-architecture ARM64 emulation on x86_64 host).
+>
+> If the build fails at `mmdebstrap` with binfmt errors, register ARM64 handlers on the host:
+> ```bash
+> docker run --privileged --rm tonistiigi/binfmt --install all
+> ```
+>
+> First run takes **30-60 minutes** (kernel compilation + rootfs build). Subsequent
+> `docker run` commands detect the existing image and skip directly to QEMU.
+
 ### Flash to Hardware
 
 ```bash

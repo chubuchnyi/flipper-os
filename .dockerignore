@@ -1,0 +1,29 @@
+# Git history (large, not needed inside container)
+.git
+
+# Build artifacts (will be generated inside container)
+out/
+*.img
+*.img.gz
+*.raucb
+*.squashfs
+rootfs-*/
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Claude Code local state
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/projects/
+.claude/plans/
+.claude/todos/
+.claude/memory/
