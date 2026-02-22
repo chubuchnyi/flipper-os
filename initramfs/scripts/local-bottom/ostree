@@ -1,0 +1,42 @@
+#!/bin/sh
+# initramfs-tools local-bottom script: switch root to OSTree deployment.
+#
+# Installed to: /usr/share/initramfs-tools/scripts/local-bottom/ostree
+# Runs after the root filesystem (sysroot) is mounted at ${rootmnt}.
+# If the kernel command line contains ostree=<deployment>, this script
+# invokes ostree-prepare-root to pivot ${rootmnt} to the deployment.
+
+PREREQ=""
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs) prereqs; exit 0 ;;
+esac
+
+# Only act if ostree= is on the kernel command line
+OSTREE_DEPLOY=""
+# Word splitting on cmdline args is intentional
+# shellcheck disable=SC2013
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        ostree=*) OSTREE_DEPLOY="${arg#ostree=}" ;;
+    esac
+done
+
+[ -n "$OSTREE_DEPLOY" ] || exit 0
+
+# ostree-prepare-root expects ${rootmnt} to be the sysroot.
+# It reads ostree= from /proc/cmdline, finds the deployment,
+# and rearranges bind mounts so ${rootmnt} points to the deployment root
+# with /sysroot, /etc (merge), and /var correctly mounted.
+# rootmnt is set by initramfs-tools before this script runs
+# shellcheck disable=SC2154
+if [ -x /usr/lib/ostree/ostree-prepare-root ]; then
+    /usr/lib/ostree/ostree-prepare-root "${rootmnt}"
+else
+    echo "ERROR: ostree-prepare-root not found in initramfs" >&2
+    exit 1
+fi

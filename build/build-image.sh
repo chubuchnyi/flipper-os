@@ -291,7 +291,7 @@ setup_boot() {
 
     local kver=""
     if [ -d "$deploy_path/usr/lib/modules" ] && [ -n "$(ls -A "$deploy_path/usr/lib/modules" 2>/dev/null)" ]; then
-        kver=$(ls "$deploy_path/usr/lib/modules/" | head -1)
+        kver=$(find "$deploy_path/usr/lib/modules/" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | head -1)
     fi
 
     if [ -z "$kver" ]; then
@@ -359,6 +359,17 @@ generate_extlinux() {
         fi
     fi
 
+    # Ensure ostree= is present in boot options
+    if ! echo "$bls_options" | grep -q 'ostree='; then
+        local deploy_checksum
+        deploy_checksum=$(find "$SYSROOT_MNT/ostree/deploy/flipper-os/deploy" \
+                               -maxdepth 1 -mindepth 1 -type d -printf '%f\n' | head -1)
+        if [ -n "$deploy_checksum" ]; then
+            bls_options="$bls_options ostree=/ostree/deploy/flipper-os/deploy/$deploy_checksum"
+            log_info "Added ostree= to boot options"
+        fi
+    fi
+
     mkdir -p "$BOOT_MNT/extlinux"
     cat > "$BOOT_MNT/extlinux/extlinux.conf" <<EOF
 ## /extlinux/extlinux.conf
@@ -366,8 +377,8 @@ generate_extlinux() {
 
 default l0
 menu title Flipper OS
-prompt 0
-timeout 30
+prompt 1
+timeout 50
 
 label l0
     menu label Flipper OS ${kver:-unknown}
@@ -385,6 +396,7 @@ EOF
     echo "    append ${bls_options}" >> "$BOOT_MNT/extlinux/extlinux.conf"
 
     log_info "extlinux.conf written"
+    log_info "Boot options: $bls_options"
 }
 
 # ── Step 11: Setup data partition ─────────────────────────────────────────────

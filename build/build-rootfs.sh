@@ -33,7 +33,7 @@ PACKAGES=(
     # Network
     iproute2 iw iwd nftables openssh-server curl ca-certificates
     # Filesystem
-    e2fsprogs ostree
+    e2fsprogs ostree ostree-boot
     # Hardware
     rfkill bluez alsa-utils alsa-ucm-conf firmware-misc-nonfree firmware-realtek
     wireless-regdb
@@ -235,6 +235,41 @@ apply_overlays() {
     log_info "Overlays applied"
 }
 
+# ── Step 3b: Install OSTree boot support ────────────────────────────────────
+# Must run BEFORE install_kernel so that update-initramfs picks up our hooks.
+
+install_ostree_boot_support() {
+    log_info "Installing OSTree boot support (initramfs hooks + config)"
+
+    # initramfs-tools hook: copies ostree-prepare-root into initramfs
+    local hooks_src="$REPO_ROOT/initramfs/hooks"
+    if [ -f "$hooks_src/ostree" ]; then
+        install -m 0755 "$hooks_src/ostree" \
+            "$ROOTFS_DIR/usr/share/initramfs-tools/hooks/ostree"
+    else
+        log_warn "initramfs hook not found: $hooks_src/ostree"
+    fi
+
+    # initramfs-tools local-bottom script: runs ostree-prepare-root at boot
+    local scripts_src="$REPO_ROOT/initramfs/scripts"
+    if [ -f "$scripts_src/local-bottom/ostree" ]; then
+        mkdir -p "$ROOTFS_DIR/usr/share/initramfs-tools/scripts/local-bottom"
+        install -m 0755 "$scripts_src/local-bottom/ostree" \
+            "$ROOTFS_DIR/usr/share/initramfs-tools/scripts/local-bottom/ostree"
+    else
+        log_warn "initramfs local-bottom script not found: $scripts_src/local-bottom/ostree"
+    fi
+
+    # ostree-prepare-root config
+    local conf_src="$REPO_ROOT/configs/ostree/prepare-root.conf"
+    if [ -f "$conf_src" ]; then
+        mkdir -p "$ROOTFS_DIR/usr/lib/ostree"
+        install -m 0644 "$conf_src" "$ROOTFS_DIR/usr/lib/ostree/prepare-root.conf"
+    else
+        log_warn "prepare-root.conf not found: $conf_src"
+    fi
+}
+
 # ── Step 6: Configure system ─────────────────────────────────────────────────
 
 configure_system() {
@@ -265,6 +300,7 @@ configure_system() {
         systemctl enable systemd-timesyncd 2>/dev/null || true
         systemctl enable ssh 2>/dev/null || true
         systemctl enable iwd 2>/dev/null || true
+        systemctl enable ostree-remount.service 2>/dev/null || true
 
         if [ -f /etc/systemd/system/set-hostname-and-banner.service ]; then
             systemctl enable set-hostname-and-banner.service 2>/dev/null || true
@@ -419,6 +455,17 @@ validate_rootfs() {
         log_warn "No kernel found in /usr/lib/modules/*/vmlinuz"
     fi
 
+    # OSTree boot support check (non-fatal)
+    if [ ! -f "$ROOTFS_DIR/usr/lib/ostree/ostree-prepare-root" ]; then
+        log_warn "ostree-prepare-root not found — OSTree boot will not work"
+    fi
+    if [ ! -f "$ROOTFS_DIR/usr/share/initramfs-tools/hooks/ostree" ]; then
+        log_warn "initramfs ostree hook not installed"
+    fi
+    if [ ! -f "$ROOTFS_DIR/usr/share/initramfs-tools/scripts/local-bottom/ostree" ]; then
+        log_warn "initramfs ostree local-bottom script not installed"
+    fi
+
     if [ "$errors" -gt 0 ]; then
         die "Validation failed with $errors error(s)"
     fi
@@ -447,6 +494,7 @@ main() {
     log_info "Output: $ROOTFS_DIR"
 
     create_rootfs
+    install_ostree_boot_support
     install_kernel
     apply_overlays
     configure_system

@@ -1,0 +1,32 @@
+#!/bin/sh
+# initramfs-tools hook: include ostree-prepare-root in initramfs.
+#
+# Installed to: /usr/share/initramfs-tools/hooks/ostree
+# This hook runs during initramfs generation (update-initramfs) and copies
+# ostree-prepare-root plus its library dependencies into the initramfs image.
+
+PREREQ=""
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# Copy ostree-prepare-root binary and all its shared library dependencies
+if [ -x /usr/lib/ostree/ostree-prepare-root ]; then
+    copy_exec /usr/lib/ostree/ostree-prepare-root /usr/lib/ostree/ostree-prepare-root
+fi
+
+# Copy prepare-root.conf if present
+if [ -f /usr/lib/ostree/prepare-root.conf ]; then
+    mkdir -p "${DESTDIR}/usr/lib/ostree"
+    cp /usr/lib/ostree/prepare-root.conf "${DESTDIR}/usr/lib/ostree/prepare-root.conf"
+elif [ -f /etc/ostree/prepare-root.conf ]; then
+    mkdir -p "${DESTDIR}/etc/ostree"
+    cp /etc/ostree/prepare-root.conf "${DESTDIR}/etc/ostree/prepare-root.conf"
+fi
