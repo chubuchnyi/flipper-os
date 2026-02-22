@@ -1,0 +1,6 @@
+# Packages for wifi-router profile
+# Informational for Phase 2 — auto-install in Phase 3/4
+dnsmasq
+hostapd
+nftables
+iwd

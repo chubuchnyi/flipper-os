@@ -21,8 +21,8 @@ image: ## Build full disk image (BOARD=rock-4d, requires sudo)
 ostree-commit: ## Generate OSTree commit from rootfs
 	./build/ostree-commit.sh
 
-profile-test: ## Test a profile in QEMU (PROFILE=wifi-router)
-	./tests/qemu-profile-test.sh $(PROFILE)
+profile-test: ## Test profile system in QEMU (BOARD=rock-4d, requires sudo)
+	sudo ./tests/qemu-profile-test.sh $(BOARD)
 
 qemu-test: ## Boot image in QEMU and verify systemd starts (requires sudo)
 	sudo ./tests/qemu-boot-test.sh $(BOARD)
@@ -34,7 +34,10 @@ flash: ## Flash image to board via Maskrom (BOARD=rock-4d)
 	./build/flash-board.sh $(BOARD)
 
 lint: ## Run linters on all code
-	shellcheck build/*.sh build/lib/*.sh profiles/cli/*.sh initramfs/*.sh 2>/dev/null || true
+	shellcheck build/*.sh build/lib/*.sh 2>/dev/null || true
+	shellcheck profiles/cli/* profiles/profiled/flipper-profiled profiles/lib/*.sh 2>/dev/null || true
+	shellcheck initramfs/hooks/* initramfs/scripts/local-bottom/* 2>/dev/null || true
+	shellcheck tests/*.sh 2>/dev/null || true
 	find . -name '*.py' | xargs ruff check 2>/dev/null || true
 
 test: ## Run integration tests

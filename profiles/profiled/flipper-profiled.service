@@ -1,0 +1,26 @@
+[Unit]
+Description=Flipper OS Profile Daemon
+Documentation=https://github.com/nickolay-github/flipper-os
+After=local-fs.target
+ConditionPathExists=/run/flipper-profile
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/flipper-os/flipper-profiled
+Restart=on-failure
+RestartSec=10
+
+# Hardening
+ProtectSystem=strict
+ReadWritePaths=/data/profiles
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

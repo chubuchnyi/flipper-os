@@ -1,0 +1,24 @@
+#!/bin/sh
+# initramfs-tools hook: include flipper-profile dependencies in initramfs.
+#
+# Installed to: /usr/share/initramfs-tools/hooks/flipper-profile
+# Copies blkid (for LABEL= partition resolution) and ensures overlay module
+# is available in the initramfs.
+
+PREREQ="ostree"
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs) prereqs; exit 0 ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+# blkid is needed to resolve LABEL=data → /dev/...
+copy_exec /sbin/blkid /sbin/blkid
+
+# Ensure overlay filesystem module is loadable (usually =y, but just in case)
+manual_add_modules overlay

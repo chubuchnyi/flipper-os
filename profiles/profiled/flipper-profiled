@@ -1,0 +1,164 @@
+#!/bin/bash
+# flipper-profiled — Flipper OS profile daemon.
+#
+# Runs as a systemd service after boot. Responsibilities:
+#   1. Update .profile.json with boot timestamp and increment boot_count
+#   2. Clean stale .tmp-* directories older than 1 hour
+#   3. Periodically update size_bytes in .profile.json (every 5 minutes)
+#   4. Graceful shutdown on SIGTERM
+
+set -euo pipefail
+
+# ── Source shared library ────────────────────────────────────────────────────
+
+if [ -f /usr/lib/flipper-os/profile-common.sh ]; then
+    # shellcheck source=../lib/profile-common.sh
+    source /usr/lib/flipper-os/profile-common.sh
+else
+    echo "ERROR: profile-common.sh not found" >&2
+    exit 1
+fi
+
+# ── State ────────────────────────────────────────────────────────────────────
+
+PROFILE_NAME=""
+PROFILE_DIR=""
+PROFILE_JSON=""
+RUNNING=true
+SIZE_UPDATE_INTERVAL=300  # 5 minutes
+STALE_TMP_AGE=3600        # 1 hour in seconds
+
+# ── Signal handler ───────────────────────────────────────────────────────────
+
+shutdown_handler() {
+    log_info "profiled: shutting down"
+    RUNNING=false
+}
+
+trap shutdown_handler SIGTERM SIGINT
+
+# ── Update profile metadata on boot ─────────────────────────────────────────
+
+update_boot_metadata() {
+    local now
+    now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    local boot_count
+    boot_count=$(json_get_int "$PROFILE_JSON" "boot_count")
+    boot_count=${boot_count:-0}
+    boot_count=$((boot_count + 1))
+
+    local size_bytes
+    size_bytes=$(profile_size_bytes "$PROFILE_NAME")
+
+    # Read current values to preserve them
+    local type template created
+    type=$(json_get "$PROFILE_JSON" "type")
+    template=$(json_get "$PROFILE_JSON" "template")
+    created=$(json_get "$PROFILE_JSON" "created")
+
+    # Rewrite the JSON (simple approach — no partial updates with sed)
+    cat > "${PROFILE_JSON}.tmp" <<EOF
+{
+    "type": "${type}",
+    "template": "${template}",
+    "created": "${created}",
+    "last_boot": "${now}",
+    "boot_count": ${boot_count},
+    "size_bytes": ${size_bytes}
+}
+EOF
+    mv -f "${PROFILE_JSON}.tmp" "$PROFILE_JSON"
+
+    log_info "profiled: updated metadata — boot #${boot_count}, size=${size_bytes}"
+}
+
+# ── Clean stale temp directories ─────────────────────────────────────────────
+
+clean_stale_temps() {
+    local now
+    now=$(date +%s)
+
+    for d in "$PROFILES_DIR"/.tmp-*; do
+        [ -d "$d" ] || continue
+
+        # Get modification time of the directory
+        local mtime
+        mtime=$(stat -c %Y "$d" 2>/dev/null) || continue
+        local age=$((now - mtime))
+
+        if [ "$age" -gt "$STALE_TMP_AGE" ]; then
+            log_info "profiled: removing stale temp dir: $(basename "$d") (age=${age}s)"
+            rm -rf "$d"
+        fi
+    done
+}
+
+# ── Update size periodically ─────────────────────────────────────────────────
+
+update_size() {
+    local size_bytes
+    size_bytes=$(profile_size_bytes "$PROFILE_NAME")
+
+    # Read current values
+    local type template created last_boot boot_count
+    type=$(json_get "$PROFILE_JSON" "type")
+    template=$(json_get "$PROFILE_JSON" "template")
+    created=$(json_get "$PROFILE_JSON" "created")
+    last_boot=$(json_get "$PROFILE_JSON" "last_boot")
+    boot_count=$(json_get_int "$PROFILE_JSON" "boot_count")
+
+    cat > "${PROFILE_JSON}.tmp" <<EOF
+{
+    "type": "${type}",
+    "template": "${template}",
+    "created": "${created}",
+    "last_boot": "${last_boot}",
+    "boot_count": ${boot_count:-0},
+    "size_bytes": ${size_bytes}
+}
+EOF
+    mv -f "${PROFILE_JSON}.tmp" "$PROFILE_JSON"
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+main() {
+    PROFILE_NAME=$(current_profile)
+    if [ -z "$PROFILE_NAME" ]; then
+        log_error "profiled: no current profile — exiting"
+        exit 1
+    fi
+
+    PROFILE_DIR="$PROFILES_DIR/$PROFILE_NAME"
+    PROFILE_JSON="$PROFILE_DIR/.profile.json"
+
+    if [ ! -f "$PROFILE_JSON" ]; then
+        log_error "profiled: profile JSON not found: $PROFILE_JSON — exiting"
+        exit 1
+    fi
+
+    log_info "profiled: started for profile '$PROFILE_NAME'"
+
+    # Boot-time tasks
+    update_boot_metadata
+    clean_stale_temps
+
+    # Main loop: update size periodically
+    local elapsed=0
+    while $RUNNING; do
+        sleep 10 &
+        wait $! 2>/dev/null || true
+
+        elapsed=$((elapsed + 10))
+
+        if [ "$elapsed" -ge "$SIZE_UPDATE_INTERVAL" ]; then
+            update_size
+            elapsed=0
+        fi
+    done
+
+    log_info "profiled: stopped"
+}
+
+main

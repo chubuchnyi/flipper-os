@@ -406,6 +406,36 @@ setup_data() {
     mkdir -p "$DATA_MNT/profiles"
     mkdir -p "$DATA_MNT/flatpak"
     mkdir -p "$DATA_MNT/shared"
+
+    # Seed profile templates from the deployment
+    local deploy_path
+    deploy_path=$(find "$SYSROOT_MNT/ostree/deploy/flipper-os/deploy" \
+                       -maxdepth 1 -mindepth 1 -type d | head -1)
+
+    local templates_src="$deploy_path/usr/share/flipper-os/templates"
+    if [ -d "$templates_src" ]; then
+        log_info "Seeding profile templates from deployment"
+        for tmpl_dir in "$templates_src"/*/; do
+            [ -d "$tmpl_dir" ] || continue
+            local name
+            name=$(basename "$tmpl_dir")
+            local dest="$DATA_MNT/profiles/$name"
+
+            cp -a "$tmpl_dir" "$dest"
+
+            # Create work/ directories (not in templates)
+            mkdir -p "$dest/work/etc" "$dest/work/usr" "$dest/work/var"
+            # Ensure upper/ directories exist
+            mkdir -p "$dest/upper/etc" "$dest/upper/usr" "$dest/upper/var"
+
+            log_info "Seeded profile: $name"
+        done
+
+        # Set default as last profile
+        echo "default" > "$DATA_MNT/.last-profile"
+    else
+        log_warn "No profile templates found in deployment — profiles will seed on first boot"
+    fi
 }
 
 # ── Step 13: Install U-Boot ──────────────────────────────────────────────────

@@ -1,0 +1,471 @@
+#!/bin/sh
+# shellcheck shell=dash
+# shellcheck disable=SC3043  # 'local' works in dash/busybox ash (initramfs)
+# initramfs-tools local-bottom script: Flipper OS profile selector + OverlayFS mount.
+#
+# Installed to: /usr/share/initramfs-tools/scripts/local-bottom/flipper-profile
+#
+# Runs after ostree-prepare-root has set up ${rootmnt} as the OSTree deployment.
+# This script:
+#   1. Mounts the data partition (LABEL=data)
+#   2. Seeds built-in profile templates on first boot
+#   3. Selects a profile (cmdline, .next-profile, auto, or text menu)
+#   4. Mounts per-directory OverlayFS (etc, usr, var) for the selected profile
+#   5. Writes runtime state files
+#
+# Kernel command line options:
+#   flipper.profile=<name>   — force a specific profile
+#   flipper.timeout=<sec>    — menu timeout (default: 5)
+#   flipper.noselector       — skip menu, use last profile
+#
+# On failure: logs error and continues boot without profile overlay (graceful degradation).
+
+PREREQ="ostree"
+
+prereqs() {
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs) prereqs; exit 0 ;;
+esac
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+log_msg() {
+    echo "flipper-profile: $*" >&2
+}
+
+log_err() {
+    echo "flipper-profile: ERROR: $*" >&2
+}
+
+# Parse a value from /proc/cmdline
+cmdline_value() {
+    local key="$1" val=""
+    # Word splitting on cmdline is intentional
+    # shellcheck disable=SC2013
+    for arg in $(cat /proc/cmdline); do
+        case "$arg" in
+            "${key}"=*) val="${arg#*=}" ;;
+        esac
+    done
+    echo "$val"
+}
+
+# Check if a flag is on the cmdline
+cmdline_has() {
+    local key="$1"
+    # shellcheck disable=SC2013
+    for arg in $(cat /proc/cmdline); do
+        case "$arg" in
+            "$key") return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# ── Configuration ────────────────────────────────────────────────────────────
+
+DATA_LABEL="data"
+DATA_MNT="/run/flipper-data"
+PROFILES_DIR="$DATA_MNT/profiles"
+# rootmnt is set by initramfs-tools before this script runs
+# shellcheck disable=SC2154
+TEMPLATES_DIR="${rootmnt}/usr/share/flipper-os/templates"
+NEXT_PROFILE="$DATA_MNT/.next-profile"
+LAST_PROFILE="$DATA_MNT/.last-profile"
+MENU_TIMEOUT=5
+
+# ── Step 1: Parse kernel command line ────────────────────────────────────────
+
+FORCE_PROFILE=$(cmdline_value "flipper.profile")
+MENU_TIMEOUT_OPT=$(cmdline_value "flipper.timeout")
+if [ -n "$MENU_TIMEOUT_OPT" ]; then
+    MENU_TIMEOUT="$MENU_TIMEOUT_OPT"
+fi
+
+NO_SELECTOR=false
+if cmdline_has "flipper.noselector"; then
+    NO_SELECTOR=true
+fi
+
+# ── Step 2: Mount data partition ─────────────────────────────────────────────
+
+mount_data() {
+    local dev=""
+
+    # Resolve LABEL=data
+    if [ -x /sbin/blkid ]; then
+        dev=$(/sbin/blkid -L "$DATA_LABEL" 2>/dev/null) || true
+    fi
+
+    # Fallback: scan /dev for common partition names
+    if [ -z "$dev" ]; then
+        for d in /dev/vda3 /dev/mmcblk0p3 /dev/sda3; do
+            if [ -b "$d" ]; then
+                dev="$d"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$dev" ]; then
+        log_err "data partition (LABEL=$DATA_LABEL) not found"
+        return 1
+    fi
+
+    mkdir -p "$DATA_MNT"
+    if ! mount -t ext4 "$dev" "$DATA_MNT"; then
+        log_err "failed to mount $dev at $DATA_MNT"
+        return 1
+    fi
+
+    log_msg "data partition mounted: $dev -> $DATA_MNT"
+    return 0
+}
+
+# ── Step 3: Cleanup stale temp directories ───────────────────────────────────
+
+cleanup_stale() {
+    for d in "$PROFILES_DIR"/.tmp-*; do
+        [ -e "$d" ] || continue
+        log_msg "removing stale temp dir: $d"
+        rm -rf "$d"
+    done
+}
+
+# ── Step 4: Seed templates on first boot ─────────────────────────────────────
+
+seed_templates() {
+    # Only seed if profiles dir is empty (first boot or after factory reset)
+    if [ -d "$PROFILES_DIR" ]; then
+        local count=0
+        for d in "$PROFILES_DIR"/*/; do
+            [ -d "$d" ] && count=$((count + 1))
+        done
+        if [ "$count" -gt 0 ]; then
+            return
+        fi
+    fi
+
+    if [ ! -d "$TEMPLATES_DIR" ]; then
+        log_err "templates directory not found: $TEMPLATES_DIR"
+        return
+    fi
+
+    log_msg "first boot: seeding profiles from templates"
+    mkdir -p "$PROFILES_DIR"
+
+    for tmpl in "$TEMPLATES_DIR"/*/; do
+        [ -d "$tmpl" ] || continue
+        local name
+        name=$(basename "$tmpl")
+        local dest="$PROFILES_DIR/$name"
+
+        cp -a "$tmpl" "$dest"
+
+        # Create work/ directories (not shipped in templates)
+        mkdir -p "$dest/work/etc" "$dest/work/usr" "$dest/work/var"
+
+        # Ensure upper/ directories exist
+        mkdir -p "$dest/upper/etc" "$dest/upper/usr" "$dest/upper/var"
+
+        log_msg "seeded profile: $name"
+    done
+}
+
+# ── Step 5: Profile selection ────────────────────────────────────────────────
+
+# List available profile names (one per line)
+list_profiles() {
+    for d in "$PROFILES_DIR"/*/; do
+        [ -d "$d" ] || continue
+        local name
+        name=$(basename "$d")
+        # Skip hidden and temp dirs
+        case "$name" in
+            .*|tmp-*) continue ;;
+        esac
+        [ -f "$d/.profile.json" ] && echo "$name"
+    done
+}
+
+# Validate that a profile name exists and is ready
+validate_profile() {
+    local name="$1"
+    [ -d "$PROFILES_DIR/$name" ] && [ -f "$PROFILES_DIR/$name/.profile.json" ]
+}
+
+# Text-mode profile selector menu
+show_menu() {
+    local profiles="$1"
+    local default_sel="$2"
+    local timeout="$MENU_TIMEOUT"
+    local count=0
+    local selected=""
+
+    echo "" >&2
+    echo "=== Flipper OS Profile Selector ===" >&2
+    echo "" >&2
+
+    # Number the profiles
+    local i=1
+    local default_num=1
+    for p in $profiles; do
+        if [ "$p" = "$default_sel" ]; then
+            echo "  $i) $p *" >&2
+            default_num=$i
+        else
+            echo "  $i) $p" >&2
+        fi
+        i=$((i + 1))
+        count=$((count + 1))
+    done
+
+    echo "" >&2
+    printf "Select profile [%d] (timeout %ds): " "$default_num" "$timeout" >&2
+
+    # Read with timeout (busybox ash supports read -t; suppress shellcheck)
+    local choice=""
+    # shellcheck disable=SC3045,SC2162
+    if read -t "$timeout" choice 2>/dev/null; then
+        : # got input
+    fi
+
+    # Empty or timeout → use default
+    if [ -z "$choice" ]; then
+        choice=$default_num
+    fi
+
+    # Validate choice is a number in range
+    if echo "$choice" | grep -qE '^[0-9]+$'; then
+        if [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
+            local j=1
+            for p in $profiles; do
+                if [ "$j" -eq "$choice" ]; then
+                    selected="$p"
+                    break
+                fi
+                j=$((j + 1))
+            done
+        fi
+    fi
+
+    # If still nothing valid, use default
+    if [ -z "$selected" ]; then
+        local j=1
+        for p in $profiles; do
+            if [ "$j" -eq "$default_num" ]; then
+                selected="$p"
+                break
+            fi
+            j=$((j + 1))
+        done
+    fi
+
+    echo "$selected"
+}
+
+select_profile() {
+    local selected=""
+    local profiles
+    profiles=$(list_profiles)
+
+    if [ -z "$profiles" ]; then
+        log_err "no profiles found"
+        return 1
+    fi
+
+    # Priority 1: kernel cmdline
+    if [ -n "$FORCE_PROFILE" ]; then
+        if validate_profile "$FORCE_PROFILE"; then
+            selected="$FORCE_PROFILE"
+            log_msg "profile from cmdline: $selected"
+        else
+            log_err "cmdline profile '$FORCE_PROFILE' not found, falling through"
+        fi
+    fi
+
+    # Priority 2: .next-profile (set by `flipper-profile switch`)
+    if [ -z "$selected" ] && [ -f "$NEXT_PROFILE" ]; then
+        local next
+        next=$(cat "$NEXT_PROFILE" 2>/dev/null)
+        rm -f "$NEXT_PROFILE"
+        if [ -n "$next" ] && validate_profile "$next"; then
+            selected="$next"
+            log_msg "profile from .next-profile: $selected"
+        else
+            log_err ".next-profile '$next' invalid, falling through"
+        fi
+    fi
+
+    # Priority 3: single profile → auto-select
+    if [ -z "$selected" ]; then
+        local count=0
+        local single=""
+        for p in $profiles; do
+            count=$((count + 1))
+            single="$p"
+        done
+        if [ "$count" -eq 1 ]; then
+            selected="$single"
+            log_msg "auto-selected (single profile): $selected"
+        fi
+    fi
+
+    # Priority 4: noselector + last profile
+    if [ -z "$selected" ] && [ "$NO_SELECTOR" = "true" ] && [ -f "$LAST_PROFILE" ]; then
+        local last
+        last=$(cat "$LAST_PROFILE" 2>/dev/null)
+        if [ -n "$last" ] && validate_profile "$last"; then
+            selected="$last"
+            log_msg "auto-selected (noselector + last): $selected"
+        fi
+    fi
+
+    # Priority 5: interactive menu
+    if [ -z "$selected" ]; then
+        local default_choice="default"
+        if [ -f "$LAST_PROFILE" ]; then
+            local lp
+            lp=$(cat "$LAST_PROFILE" 2>/dev/null)
+            if [ -n "$lp" ] && validate_profile "$lp"; then
+                default_choice="$lp"
+            fi
+        fi
+        selected=$(show_menu "$profiles" "$default_choice")
+    fi
+
+    if [ -z "$selected" ]; then
+        log_err "no profile selected"
+        return 1
+    fi
+
+    echo "$selected"
+}
+
+# ── Step 6: Clear stale OverlayFS workdirs ───────────────────────────────────
+
+clear_workdirs() {
+    local profile="$1"
+    local profile_dir="$PROFILES_DIR/$profile"
+
+    for subdir in etc usr var; do
+        local workdir="$profile_dir/work/$subdir"
+        if [ -d "$workdir" ]; then
+            # OverlayFS workdir contains internal 'work' and 'index' dirs
+            # that must be cleaned after unclean shutdown
+            rm -rf "$workdir/work" "$workdir/index" 2>/dev/null || true
+        fi
+        mkdir -p "$workdir"
+    done
+}
+
+# ── Step 7: Mount OverlayFS layers ──────────────────────────────────────────
+
+mount_overlays() {
+    local profile="$1"
+    local profile_dir="$PROFILES_DIR/$profile"
+    local errors=0
+
+    for subdir in etc var usr; do
+        local lower="${rootmnt}/${subdir}"
+        local upper="$profile_dir/upper/$subdir"
+        local work="$profile_dir/work/$subdir"
+        local merged="${rootmnt}/${subdir}"
+
+        # Ensure directories exist
+        mkdir -p "$upper" "$work"
+
+        if ! mount -t overlay overlay \
+            -o "lowerdir=${lower},upperdir=${upper},workdir=${work}" \
+            "$merged"; then
+            log_err "failed to mount overlay for /$subdir"
+            errors=$((errors + 1))
+        else
+            log_msg "overlay mounted: /$subdir (profile=$profile)"
+        fi
+    done
+
+    return $errors
+}
+
+# ── Step 8: Write state files ────────────────────────────────────────────────
+
+write_state() {
+    local profile="$1"
+
+    # Runtime state (in tmpfs, available to systemd services)
+    mkdir -p "$(dirname "${rootmnt}/run/flipper-profile")"
+    echo "$profile" > "${rootmnt}/run/flipper-profile"
+    echo "ok" > "${rootmnt}/run/flipper-profile-status"
+
+    # Persistent state (on data partition)
+    echo "$profile" > "$LAST_PROFILE"
+
+    log_msg "state written: profile=$profile"
+}
+
+# ── Step 9: Bind /data into rootfs ───────────────────────────────────────────
+
+bind_data() {
+    local data_target="${rootmnt}/data"
+    mkdir -p "$data_target"
+
+    if ! mount --bind "$DATA_MNT" "$data_target"; then
+        log_err "failed to bind-mount $DATA_MNT to $data_target"
+        return 1
+    fi
+
+    log_msg "/data bind-mounted"
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+main() {
+    log_msg "starting profile system"
+
+    # Mount data partition
+    if ! mount_data; then
+        log_err "cannot mount data partition — booting without profile"
+        echo "none" > "${rootmnt}/run/flipper-profile-status" 2>/dev/null || true
+        return 0
+    fi
+
+    # Cleanup stale temp directories
+    cleanup_stale
+
+    # Seed templates on first boot
+    seed_templates
+
+    # Select profile
+    local profile
+    profile=$(select_profile) || {
+        log_err "profile selection failed — booting without profile"
+        echo "no-profile" > "${rootmnt}/run/flipper-profile-status" 2>/dev/null || true
+        bind_data || true
+        return 0
+    }
+
+    log_msg "selected profile: $profile"
+
+    # Clear stale workdirs (crash recovery)
+    clear_workdirs "$profile"
+
+    # Mount overlays
+    if ! mount_overlays "$profile"; then
+        log_err "overlay mount had errors — some layers may not be active"
+        echo "partial" > "${rootmnt}/run/flipper-profile-status" 2>/dev/null || true
+    fi
+
+    # Write state
+    write_state "$profile"
+
+    # Bind /data into rootfs
+    bind_data || true
+
+    log_msg "profile system ready: $profile"
+}
+
+main

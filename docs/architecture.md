@@ -6,17 +6,17 @@
 
 ### Phase 1: OSTree Foundation 
 Transform Debian build scripts into OSTree-managed immutable rootfs.
-- [ ] Modified build scripts producing OSTree commits
-- [ ] Partition layout tool (boot, sysroot, data)
-- [ ] U-Boot integration with OSTree kernel params
-- [ ] Smoke test: boot from OSTree on Radxa Rock 4D
+- [x] Modified build scripts producing OSTree commits
+- [x] Partition layout tool (boot, sysroot, data)
+- [x] U-Boot integration with OSTree kernel params
+- [x] Smoke test: boot from OSTree on Radxa Rock 4D
 
 ### Phase 2: Profile System Core 
 Profile creation, switching, reset, clone.
-- [ ] flipper-profiled daemon
-- [ ] Custom initramfs with profile selector (text UI)
-- [ ] flipper-profile CLI tool
-- [ ] Built-in profile templates (wifi-router, desktop, sniffer)
+- [x] flipper-profiled daemon
+- [x] Custom initramfs with profile selector (text UI)
+- [x] flipper-profile CLI tool
+- [x] Built-in profile templates (wifi-router, desktop, sniffer)
 
 ### Phase 3: Update System 
 OTA updates for OS and firmware.

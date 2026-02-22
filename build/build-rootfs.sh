@@ -182,6 +182,13 @@ install_kernel() {
             cp "$vmlinuz" "$moddir/vmlinuz"
             log_info "Kernel $kver: vmlinuz copied to /usr/lib/modules/$kver/vmlinuz"
         fi
+
+        # Copy initramfs to modules dir — ostree admin deploy looks here
+        local initrd="$ROOTFS_DIR/boot/initrd.img-$kver"
+        if [ -f "$initrd" ] && [ -d "$moddir" ]; then
+            cp "$initrd" "$moddir/initramfs.img"
+            log_info "Kernel $kver: initramfs copied to /usr/lib/modules/$kver/initramfs.img"
+        fi
     fi
 
     rm -rf "$tmp_debs"
@@ -280,6 +287,58 @@ install_ostree_boot_support() {
     fi
 }
 
+# ── Step 5b: Install profile system ──────────────────────────────────────────
+# Must run BEFORE install_kernel/update-initramfs so initramfs picks up our hooks.
+
+install_profile_system() {
+    log_info "Installing Flipper OS profile system"
+
+    # Shared library
+    local lib_dest="$ROOTFS_DIR/usr/lib/flipper-os"
+    mkdir -p "$lib_dest"
+    install -m 0644 "$REPO_ROOT/profiles/lib/profile-common.sh" "$lib_dest/profile-common.sh"
+
+    # CLI tool
+    install -m 0755 "$REPO_ROOT/profiles/cli/flipper-profile" "$ROOTFS_DIR/usr/local/bin/flipper-profile"
+
+    # Profiled daemon
+    install -m 0755 "$REPO_ROOT/profiles/profiled/flipper-profiled" "$lib_dest/flipper-profiled"
+
+    # systemd service
+    install -m 0644 "$REPO_ROOT/profiles/profiled/flipper-profiled.service" \
+        "$ROOTFS_DIR/usr/lib/systemd/system/flipper-profiled.service"
+
+    # data.mount safety net
+    install -m 0644 "$REPO_ROOT/configs/systemd/data.mount" \
+        "$ROOTFS_DIR/usr/lib/systemd/system/data.mount"
+
+    # Profile templates → /usr/share/flipper-os/templates/
+    local tmpl_dest="$ROOTFS_DIR/usr/share/flipper-os/templates"
+    mkdir -p "$tmpl_dest"
+    for tmpl_dir in "$REPO_ROOT/profiles/templates"/*/; do
+        [ -d "$tmpl_dir" ] || continue
+        local name
+        name=$(basename "$tmpl_dir")
+        cp -a "$tmpl_dir" "$tmpl_dest/$name"
+        # Ensure upper directories exist (some may only have .gitkeep)
+        mkdir -p "$tmpl_dest/$name/upper/etc" "$tmpl_dest/$name/upper/usr" "$tmpl_dest/$name/upper/var"
+    done
+
+    # initramfs hook
+    install -m 0755 "$REPO_ROOT/initramfs/hooks/flipper-profile" \
+        "$ROOTFS_DIR/usr/share/initramfs-tools/hooks/flipper-profile"
+
+    # initramfs local-bottom script
+    mkdir -p "$ROOTFS_DIR/usr/share/initramfs-tools/scripts/local-bottom"
+    install -m 0755 "$REPO_ROOT/initramfs/scripts/local-bottom/flipper-profile" \
+        "$ROOTFS_DIR/usr/share/initramfs-tools/scripts/local-bottom/flipper-profile"
+
+    # Create /data mountpoint in rootfs
+    mkdir -p "$ROOTFS_DIR/data"
+
+    log_info "Profile system installed"
+}
+
 # ── Step 6: Configure system ─────────────────────────────────────────────────
 
 configure_system() {
@@ -311,6 +370,10 @@ configure_system() {
         systemctl enable ssh 2>/dev/null || true
         systemctl enable iwd 2>/dev/null || true
         systemctl enable ostree-remount.service 2>/dev/null || true
+
+        # Profile system services
+        systemctl enable flipper-profiled.service 2>/dev/null || true
+        systemctl enable data.mount 2>/dev/null || true
 
         if [ -f /etc/systemd/system/set-hostname-and-banner.service ]; then
             systemctl enable set-hostname-and-banner.service 2>/dev/null || true
@@ -505,6 +568,7 @@ main() {
 
     create_rootfs
     install_ostree_boot_support
+    install_profile_system
     install_kernel
     apply_overlays
     configure_system

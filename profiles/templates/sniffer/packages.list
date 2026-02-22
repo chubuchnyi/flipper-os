@@ -1,0 +1,5 @@
+# Packages for sniffer profile (network analysis)
+# Informational for Phase 2 — auto-install in Phase 3/4
+tshark
+tcpdump
+nmap

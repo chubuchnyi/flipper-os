@@ -1,0 +1,17 @@
+[Unit]
+Description=Flipper OS Data Partition
+Documentation=https://github.com/nickolay-github/flipper-os
+DefaultDependencies=no
+After=blockdev@dev-disk-by\x2dlabel-data.target
+
+# Safety net: do not mount if initramfs already mounted /data
+ConditionPathIsMountPoint=!/data
+
+[Mount]
+What=LABEL=data
+Where=/data
+Type=ext4
+Options=defaults
+
+[Install]
+WantedBy=local-fs.target

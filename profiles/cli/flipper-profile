@@ -1,0 +1,378 @@
+#!/bin/bash
+# flipper-profile — Flipper OS profile management CLI.
+#
+# Usage:
+#   flipper-profile <command> [args...]
+#
+# Commands:
+#   list                     List all profiles
+#   info [name]              Show profile details (default: current)
+#   current                  Print current profile name
+#   create [name]            Create a new empty profile
+#   create --from <template> Create a profile from a template
+#   clone <src> [dst]        Clone a profile
+#   delete <name>            Delete a user profile
+#   reset <name>             Reset a built-in profile to template defaults
+#   switch <name>            Switch to profile on next reboot
+#   rename <old> <new>       Rename a profile
+
+set -euo pipefail
+
+# ── Locate and source shared library ─────────────────────────────────────────
+
+# When installed: /usr/lib/flipper-os/profile-common.sh
+# When running from repo: profiles/lib/profile-common.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ -f /usr/lib/flipper-os/profile-common.sh ]; then
+    # shellcheck source=../lib/profile-common.sh
+    source /usr/lib/flipper-os/profile-common.sh
+elif [ -f "$SCRIPT_DIR/../lib/profile-common.sh" ]; then
+    # shellcheck source=../lib/profile-common.sh
+    source "$SCRIPT_DIR/../lib/profile-common.sh"
+else
+    echo "ERROR: profile-common.sh not found" >&2
+    exit 1
+fi
+
+# ── Commands ──────────────────────────────────────────────────────────────────
+
+cmd_list() {
+    if [ ! -d "$PROFILES_DIR" ]; then
+        die "Profiles directory not found: $PROFILES_DIR"
+    fi
+
+    local cur
+    cur=$(current_profile)
+
+    printf "%-20s %-10s %-12s %s\n" "NAME" "TYPE" "SIZE" "STATUS"
+    printf "%-20s %-10s %-12s %s\n" "----" "----" "----" "------"
+
+    for dir in "$PROFILES_DIR"/*/; do
+        [ -d "$dir" ] || continue
+        local name
+        name=$(basename "$dir")
+
+        # Skip hidden and temp dirs
+        case "$name" in
+            .*|tmp-*) continue ;;
+        esac
+
+        [ -f "$dir/.profile.json" ] || continue
+
+        local type size_bytes size_human status=""
+        type=$(json_get "$dir/.profile.json" "type")
+        size_bytes=$(profile_size_bytes "$name")
+        size_human=$(human_size "$size_bytes")
+
+        if [ "$name" = "$cur" ]; then
+            status="active"
+        fi
+
+        printf "%-20s %-10s %-12s %s\n" "$name" "$type" "$size_human" "$status"
+    done
+}
+
+cmd_info() {
+    local name="${1:-}"
+
+    if [ -z "$name" ]; then
+        name=$(current_profile)
+        if [ -z "$name" ]; then
+            die "No profile specified and no current profile"
+        fi
+    fi
+
+    if ! profile_exists "$name"; then
+        die "Profile not found: $name"
+    fi
+
+    local json="$PROFILES_DIR/$name/.profile.json"
+    local type template created last_boot boot_count size_bytes
+
+    type=$(json_get "$json" "type")
+    template=$(json_get "$json" "template")
+    created=$(json_get "$json" "created")
+    last_boot=$(json_get "$json" "last_boot")
+    boot_count=$(json_get_int "$json" "boot_count")
+    size_bytes=$(profile_size_bytes "$name")
+
+    echo "Profile:    $name"
+    echo "Type:       ${type:-unknown}"
+    echo "Template:   ${template:--}"
+    echo "Created:    ${created:--}"
+    echo "Last boot:  ${last_boot:--}"
+    echo "Boot count: ${boot_count:-0}"
+    echo "Size:       $(human_size "$size_bytes") ($size_bytes bytes)"
+
+    local cur
+    cur=$(current_profile)
+    if [ "$name" = "$cur" ]; then
+        echo "Status:     active"
+    fi
+}
+
+cmd_current() {
+    local cur
+    cur=$(current_profile)
+    if [ -z "$cur" ]; then
+        die "No profile is currently active (not booted with profile system)"
+    fi
+    echo "$cur"
+}
+
+cmd_create() {
+    local name="" from_template=""
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --from)
+                from_template="$2"; shift 2 ;;
+            *)
+                name="$1"; shift ;;
+        esac
+    done
+
+    # Generate random name if not provided
+    if [ -z "$name" ]; then
+        name=$(generate_random_name)
+    fi
+
+    profile_validate_name "$name"
+
+    if profile_exists "$name"; then
+        die "Profile already exists: $name"
+    fi
+
+    local tmp_dir="$PROFILES_DIR/.tmp-create-$$-$name"
+    # Clean up on failure
+    trap 'rm -rf "$tmp_dir"' EXIT
+
+    if [ -n "$from_template" ]; then
+        # Create from template
+        local tmpl_dir="$TEMPLATES_DIR/$from_template"
+        if [ ! -d "$tmpl_dir" ]; then
+            # Also check profiles dir for existing profile templates
+            tmpl_dir="$PROFILES_DIR/$from_template"
+            if [ ! -d "$tmpl_dir" ]; then
+                die "Template not found: $from_template"
+            fi
+        fi
+
+        cp -a "$tmpl_dir" "$tmp_dir"
+
+        # Update JSON: set type to user, update created timestamp
+        write_profile_json "$tmp_dir" "user" "$from_template"
+
+        # Ensure work dirs exist
+        mkdir -p "$tmp_dir/work/etc" "$tmp_dir/work/usr" "$tmp_dir/work/var"
+    else
+        # Create empty profile
+        mkdir -p "$tmp_dir"
+        init_profile_dirs "$tmp_dir"
+        write_profile_json "$tmp_dir" "user" ""
+    fi
+
+    # Atomic move to final location
+    mv "$tmp_dir" "$PROFILES_DIR/$name"
+    trap - EXIT
+
+    log_info "Created profile: $name"
+}
+
+cmd_clone() {
+    local src="${1:-}"
+    local dst="${2:-}"
+
+    if [ -z "$src" ]; then
+        die "Usage: flipper-profile clone <source> [destination]"
+    fi
+
+    if ! profile_exists "$src"; then
+        die "Source profile not found: $src"
+    fi
+
+    if [ -z "$dst" ]; then
+        dst=$(generate_random_name)
+    fi
+
+    profile_validate_name "$dst"
+
+    if profile_exists "$dst"; then
+        die "Destination profile already exists: $dst"
+    fi
+
+    local tmp_dir="$PROFILES_DIR/.tmp-clone-$$-$dst"
+    trap 'rm -rf "$tmp_dir"' EXIT
+
+    # Copy upper/ from source
+    mkdir -p "$tmp_dir"
+    cp -a "$PROFILES_DIR/$src/upper" "$tmp_dir/upper"
+
+    # Fresh work directories
+    mkdir -p "$tmp_dir/work/etc" "$tmp_dir/work/usr" "$tmp_dir/work/var"
+
+    # New profile JSON
+    local src_template
+    src_template=$(profile_template "$src")
+    write_profile_json "$tmp_dir" "user" "${src_template:-}"
+
+    # Atomic move
+    mv "$tmp_dir" "$PROFILES_DIR/$dst"
+    trap - EXIT
+
+    log_info "Cloned '$src' -> '$dst'"
+}
+
+cmd_delete() {
+    local name="${1:-}"
+
+    if [ -z "$name" ]; then
+        die "Usage: flipper-profile delete <name>"
+    fi
+
+    if ! profile_exists "$name"; then
+        die "Profile not found: $name"
+    fi
+
+    # Cannot delete built-in profiles
+    local type
+    type=$(profile_type "$name")
+    if [ "$type" = "built-in" ]; then
+        die "Cannot delete built-in profile '$name'. Use 'reset' instead."
+    fi
+
+    # Cannot delete the currently active profile
+    local cur
+    cur=$(current_profile)
+    if [ "$name" = "$cur" ]; then
+        die "Cannot delete the active profile. Switch to another profile first."
+    fi
+
+    # Atomic delete: move to temp, then remove
+    local tmp_dir="$PROFILES_DIR/.tmp-delete-$$-$name"
+    mv "$PROFILES_DIR/$name" "$tmp_dir"
+    rm -rf "$tmp_dir"
+
+    log_info "Deleted profile: $name"
+}
+
+cmd_reset() {
+    local name="${1:-}"
+
+    if [ -z "$name" ]; then
+        die "Usage: flipper-profile reset <name>"
+    fi
+
+    if ! profile_exists "$name"; then
+        die "Profile not found: $name"
+    fi
+
+    # Can only reset built-in profiles
+    local type
+    type=$(profile_type "$name")
+    if [ "$type" != "built-in" ]; then
+        die "Can only reset built-in profiles. '$name' is type '$type'."
+    fi
+
+    # Get template name
+    local template
+    template=$(profile_template "$name")
+    if [ -z "$template" ]; then
+        template="$name"
+    fi
+
+    local tmpl_dir="$TEMPLATES_DIR/$template"
+    if [ ! -d "$tmpl_dir" ]; then
+        die "Template not found for reset: $tmpl_dir"
+    fi
+
+    # Atomic reset: move old out, copy template in, move new in, remove old
+    local old_dir="$PROFILES_DIR/.tmp-reset-old-$$-$name"
+    local new_dir="$PROFILES_DIR/.tmp-reset-new-$$-$name"
+
+    # Prepare new from template
+    cp -a "$tmpl_dir" "$new_dir"
+    mkdir -p "$new_dir/work/etc" "$new_dir/work/usr" "$new_dir/work/var"
+    mkdir -p "$new_dir/upper/etc" "$new_dir/upper/usr" "$new_dir/upper/var"
+
+    # Swap
+    mv "$PROFILES_DIR/$name" "$old_dir"
+    mv "$new_dir" "$PROFILES_DIR/$name"
+    rm -rf "$old_dir"
+
+    log_info "Reset profile '$name' to template '$template'"
+}
+
+cmd_switch() {
+    local name="${1:-}"
+
+    if [ -z "$name" ]; then
+        die "Usage: flipper-profile switch <name>"
+    fi
+
+    if ! profile_exists "$name"; then
+        die "Profile not found: $name"
+    fi
+
+    atomic_write "$NEXT_PROFILE_FILE" "$name"
+
+    log_info "Will switch to profile '$name' on next reboot"
+}
+
+cmd_rename() {
+    local old="${1:-}"
+    local new="${2:-}"
+
+    if [ -z "$old" ] || [ -z "$new" ]; then
+        die "Usage: flipper-profile rename <old-name> <new-name>"
+    fi
+
+    if ! profile_exists "$old"; then
+        die "Profile not found: $old"
+    fi
+
+    profile_validate_name "$new"
+
+    if profile_exists "$new"; then
+        die "Profile already exists: $new"
+    fi
+
+    # Cannot rename the active profile
+    local cur
+    cur=$(current_profile)
+    if [ "$old" = "$cur" ]; then
+        die "Cannot rename the active profile. Switch to another profile first."
+    fi
+
+    mv "$PROFILES_DIR/$old" "$PROFILES_DIR/$new"
+
+    log_info "Renamed '$old' -> '$new'"
+}
+
+cmd_help() {
+    head -n 15 "${BASH_SOURCE[0]}" | tail -n +2 | sed 's/^# \?//'
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        list)    cmd_list "$@" ;;
+        info)    cmd_info "$@" ;;
+        current) cmd_current "$@" ;;
+        create)  cmd_create "$@" ;;
+        clone)   cmd_clone "$@" ;;
+        delete)  cmd_delete "$@" ;;
+        reset)   cmd_reset "$@" ;;
+        switch)  cmd_switch "$@" ;;
+        rename)  cmd_rename "$@" ;;
+        help|-h|--help) cmd_help ;;
+        *)       die "Unknown command: $cmd. Run 'flipper-profile help' for usage." ;;
+    esac
+}
+
+main "$@"
