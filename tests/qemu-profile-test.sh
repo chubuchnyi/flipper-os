@@ -220,8 +220,8 @@ run_tests() {
     fi
 
     # Test 3: Check for overlay mount messages
-    local overlay_count
-    overlay_count=$(grep -c "flipper-profile:.*overlay mounted:" "$SERIAL_LOG" 2>/dev/null || echo "0")
+    local overlay_count=0
+    overlay_count=$(grep -c "flipper-profile:.*overlay mounted:" "$SERIAL_LOG" 2>/dev/null) || overlay_count=0
     if [ "$overlay_count" -ge 3 ]; then
         test_pass "Three overlay mounts reported (etc, var, usr)"
     elif [ "$overlay_count" -gt 0 ]; then

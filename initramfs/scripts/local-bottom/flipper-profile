@@ -160,7 +160,8 @@ seed_templates() {
     for tmpl in "$TEMPLATES_DIR"/*/; do
         [ -d "$tmpl" ] || continue
         local name
-        name=$(basename "$tmpl")
+        name="${tmpl%/}"
+        name="${name##*/}"
         local dest="$PROFILES_DIR/$name"
 
         cp -a "$tmpl" "$dest"
@@ -182,7 +183,8 @@ list_profiles() {
     for d in "$PROFILES_DIR"/*/; do
         [ -d "$d" ] || continue
         local name
-        name=$(basename "$d")
+        name="${d%/}"
+        name="${name##*/}"
         # Skip hidden and temp dirs
         case "$name" in
             .*|tmp-*) continue ;;
@@ -238,19 +240,22 @@ show_menu() {
         choice=$default_num
     fi
 
-    # Validate choice is a number in range
-    if echo "$choice" | grep -qE '^[0-9]+$'; then
-        if [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
-            local j=1
-            for p in $profiles; do
-                if [ "$j" -eq "$choice" ]; then
-                    selected="$p"
-                    break
-                fi
-                j=$((j + 1))
-            done
-        fi
-    fi
+    # Validate choice is a number in range (no grep in initramfs)
+    case "$choice" in
+        *[!0-9]*|'') ;; # not a number, skip
+        *)
+            if [ "$choice" -ge 1 ] && [ "$choice" -le "$count" ]; then
+                local j=1
+                for p in $profiles; do
+                    if [ "$j" -eq "$choice" ]; then
+                        selected="$p"
+                        break
+                    fi
+                    j=$((j + 1))
+                done
+            fi
+            ;;
+    esac
 
     # If still nothing valid, use default
     if [ -z "$selected" ]; then
@@ -369,6 +374,9 @@ mount_overlays() {
     local profile_dir="$PROFILES_DIR/$profile"
     local errors=0
 
+    # Ensure overlay module is loaded
+    modprobe overlay 2>/dev/null || true
+
     for subdir in etc var usr; do
         local lower="${rootmnt}/${subdir}"
         local upper="$profile_dir/upper/$subdir"
@@ -378,9 +386,10 @@ mount_overlays() {
         # Ensure directories exist
         mkdir -p "$upper" "$work"
 
-        if ! mount -t overlay overlay \
-            -o "lowerdir=${lower},upperdir=${upper},workdir=${work}" \
-            "$merged"; then
+        log_msg "mounting overlay /$subdir: lower=$lower upper=$upper work=$work"
+
+        local mount_opts="lowerdir=${lower},upperdir=${upper},workdir=${work}"
+        if ! mount -t overlay -o "$mount_opts" overlay "$merged" 2>&1; then
             log_err "failed to mount overlay for /$subdir"
             errors=$((errors + 1))
         else
@@ -397,7 +406,7 @@ write_state() {
     local profile="$1"
 
     # Runtime state (in tmpfs, available to systemd services)
-    mkdir -p "$(dirname "${rootmnt}/run/flipper-profile")"
+    mkdir -p "${rootmnt}/run"
     echo "$profile" > "${rootmnt}/run/flipper-profile"
     echo "ok" > "${rootmnt}/run/flipper-profile-status"
 
@@ -413,7 +422,7 @@ bind_data() {
     local data_target="${rootmnt}/data"
     mkdir -p "$data_target"
 
-    if ! mount --bind "$DATA_MNT" "$data_target"; then
+    if ! mount -o bind "$DATA_MNT" "$data_target"; then
         log_err "failed to bind-mount $DATA_MNT to $data_target"
         return 1
     fi
