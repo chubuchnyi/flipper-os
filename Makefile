@@ -1,4 +1,4 @@
-.PHONY: help rootfs image ostree-commit profile-test rauc-bundle flash lint test clean
+.PHONY: help kernel rootfs image ostree-commit profile-test qemu-test rauc-bundle flash lint test clean
 
 SHELL := /bin/bash
 FLIPPER_DEV ?= $(HOME)/flipper-one-dev
@@ -8,6 +8,9 @@ OSTREE_REPO ?= $(FLIPPER_DEV)/ostree-work/repo
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+kernel: ## Build kernel with Flipper OS fragments (uses upstream build scripts)
+	./build/build-kernel.sh
 
 rootfs: ## Build OSTree-ready rootfs (requires sudo)
 	sudo ./build/build-rootfs.sh
@@ -20,6 +23,9 @@ ostree-commit: ## Generate OSTree commit from rootfs
 
 profile-test: ## Test a profile in QEMU (PROFILE=wifi-router)
 	./tests/qemu-profile-test.sh $(PROFILE)
+
+qemu-test: ## Boot image in QEMU and verify systemd starts (requires sudo)
+	sudo ./tests/qemu-boot-test.sh $(BOARD)
 
 rauc-bundle: ## Create RAUC firmware update bundle
 	./rauc/build-bundle.sh

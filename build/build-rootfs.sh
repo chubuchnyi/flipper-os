@@ -129,11 +129,12 @@ install_kernel() {
         return
     fi
 
-    # Auto-detect kernel dir: look in upstream build output or FLIPPER_DEV
+    # Auto-detect kernel dir: look in upstream build output
     if [ -z "$KERNEL_DIR" ]; then
         local search_dirs=(
+            "${REPOS}/rk3576-linux-build/out/linux"
+            "${REPOS}/flipperone-linux-build-scripts/prebuilt/linux"
             "${FLIPPER_DEV}/kernel-debs"
-            "${FLIPPER_DEV}/repos/flipper-linux-kernel/debian/output"
         )
         for d in "${search_dirs[@]}"; do
             if compgen -G "$d/linux-image-*.deb" >/dev/null 2>&1; then
@@ -151,10 +152,19 @@ install_kernel() {
 
     log_info "Installing kernel from $KERNEL_DIR"
 
-    # Copy .deb(s) into rootfs temporarily
+    # Copy .deb(s) into rootfs temporarily (exclude -dbg packages)
     local tmp_debs="$ROOTFS_DIR/tmp/kernel-debs"
     mkdir -p "$tmp_debs"
-    cp "$KERNEL_DIR"/linux-image-*.deb "$tmp_debs/"
+    for deb in "$KERNEL_DIR"/linux-image-*.deb; do
+        case "$deb" in *-dbg_*) continue ;; esac
+        cp "$deb" "$tmp_debs/"
+    done
+
+    if [ -z "$(ls -A "$tmp_debs" 2>/dev/null)" ]; then
+        log_warn "No non-debug kernel .deb found in $KERNEL_DIR"
+        rm -rf "$tmp_debs"
+        return
+    fi
 
     setup_chroot "$ROOTFS_DIR"
     # shellcheck disable=SC2064
