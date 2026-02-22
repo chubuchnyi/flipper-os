@@ -12,22 +12,28 @@ See @docs/concept.md for the original Flipper OS concept.
 flipper-os/                        ← THIS REPO
 ├── build/                         ← Build scripts (kernel, rootfs, image generation)
 │   ├── build-kernel.sh            ← Kernel build with fragment injection
-│   ├── build-rootfs.sh            ← OSTree-ready rootfs via mmdebstrap
-│   ├── build-image.sh             ← GPT disk image from OSTree commit
+│   ├── build-rootfs.sh            ← OSTree-ready rootfs via mmdebstrap (+profile system install)
+│   ├── build-image.sh             ← GPT disk image from OSTree commit (+template seeding)
 │   ├── ostree-commit.sh           ← OSTree commit from rootfs
 │   └── lib/common.sh              ← Shared helpers (logging, env, cleanup)
 ├── configs/                       ← Board DTS, kernel config, U-Boot env
-│   └── kernel/fragments/          ← Kernel config fragments (ostree, qemu-virt)
+│   ├── kernel/fragments/          ← Kernel config fragments (ostree, qemu-virt)
+│   └── systemd/                   ← systemd units (data.mount)
 ├── ostree/                        ← OSTree repo management, commit tooling
-├── profiles/                      ← Profile system (profiled daemon, CLI, templates)
-│   ├── profiled/                  ← systemd service managing profile lifecycle
-│   ├── cli/                       ← flipper-profile command-line tool
-│   └── templates/                 ← Built-in profile configs (wifi-router, desktop, etc.)
+├── profiles/                      ← Profile system
+│   ├── lib/profile-common.sh      ← Shared bash library for CLI and daemon
+│   ├── cli/flipper-profile        ← CLI tool → /usr/local/bin/flipper-profile
+│   ├── profiled/flipper-profiled  ← Daemon (metadata updates, cleanup)
+│   ├── profiled/flipper-profiled.service ← systemd unit
+│   └── templates/                 ← Built-in profile templates (default, wifi-router, desktop, sniffer)
 ├── initramfs/                     ← Custom initramfs with profile selector
-├── updater/                       ← flipper-updater OTA service
-├── rauc/                          ← RAUC bundle configs and integration
+│   ├── hooks/flipper-profile      ← Initramfs build hook (copies blkid, loads overlay)
+│   └── scripts/local-bottom/      ← Boot scripts (ostree-prepare-root, flipper-profile)
+├── updater/                       ← flipper-updater OTA service (planned)
+├── rauc/                          ← RAUC bundle configs and integration (planned)
 ├── tests/                         ← Integration tests, QEMU-based smoke tests
-│   └── qemu-boot-test.sh         ← QEMU virt boot smoke test
+│   ├── qemu-boot-test.sh         ← QEMU virt boot smoke test
+│   └── qemu-profile-test.sh      ← Profile system integration test (overlay mounts, selection)
 └── docs/                          ← Architecture, specs, decision records
 ```
 
@@ -47,7 +53,7 @@ make rootfs                             # Build OSTree-ready rootfs (sudo)
 make ostree-commit                      # Generate OSTree commit from rootfs
 make image                              # Build full disk image (sudo)
 make qemu-test BOARD=rock-4d            # QEMU boot smoke test (sudo)
-make profile-test PROFILE=wifi-router   # Test a profile in QEMU
+make profile-test BOARD=rock-4d         # Profile system QEMU test (sudo)
 make rauc-bundle                        # Create firmware update bundle
 make flash BOARD=rock-4d                # Flash to dev board via Maskrom
 shellcheck build/*.sh                   # Lint shell scripts

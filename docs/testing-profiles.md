@@ -8,7 +8,7 @@ shell script validation to full QEMU integration tests.
 ```bash
 # Host packages (Ubuntu/Debian)
 sudo apt install shellcheck qemu-system-arm mmdebstrap qemu-user-static \
-    binfmt-support e2fsprogs ostree expect
+    binfmt-support e2fsprogs ostree
 
 # Load environment
 source ~/flipper-one-dev/.env
@@ -409,7 +409,64 @@ sudo qemu-system-aarch64 ... \
 
 Should auto-select the last booted profile without showing a menu.
 
-## 9. Checklist
+## 9. Troubleshooting
+
+### Common initramfs issues
+
+The initramfs uses busybox `ash`, which is more limited than full bash. If you
+modify `initramfs/scripts/local-bottom/flipper-profile`, keep these constraints
+in mind:
+
+| Pitfall | Symptom | Fix |
+|---------|---------|-----|
+| `basename` used | `basename: not found` | Use `${var%/}; ${var##*/}` |
+| `dirname` used | `dirname: not found` | Use `${var%/*}` or hardcode path |
+| `grep` used | `grep: not found` | Use `case` statements instead |
+| `mount --bind` | `mount: invalid option --` | Use `mount -o bind` |
+| Multi-line `mount -t overlay` | `Usage: mount [...]` | Put entire command on one line |
+| `read -t` not working | No timeout on menu | busybox ash supports `read -t` but suppress SC3045 |
+
+### No serial output from QEMU
+
+Ensure the kernel config includes:
+```
+CONFIG_SERIAL_AMBA_PL011=y
+CONFIG_SERIAL_AMBA_PL011_CONSOLE=y
+```
+
+And the boot args include `console=ttyAMA0` (not `ttyS2` or `tty1`).
+
+### QEMU disk not found ("LABEL=sysroot does not exist")
+
+Ensure the kernel config includes:
+```
+CONFIG_PCI_HOST_GENERIC=y
+```
+
+QEMU virt uses a generic PCI host bridge. Without this, virtio-pci devices
+(including the disk) are invisible to the kernel.
+
+### Overlay mount fails
+
+Check the serial log for the exact error. Common causes:
+- Overlay module not loaded: the initramfs script runs `modprobe overlay`
+- Workdir on different filesystem than upperdir: both must be on the data partition
+- Stale workdir from crash: the script clears `work/<dir>/work` and `work/<dir>/index`
+
+### Stale rootfs from failed build
+
+If `build-rootfs.sh` fails mid-build, `/proc` or `/dev` may remain mounted inside
+the rootfs directory. Clean up with:
+
+```bash
+sudo umount $FLIPPER_DEV/ostree-work/rootfs/proc 2>/dev/null
+sudo umount $FLIPPER_DEV/ostree-work/rootfs/sys 2>/dev/null
+sudo umount $FLIPPER_DEV/ostree-work/rootfs/dev/pts 2>/dev/null
+sudo umount $FLIPPER_DEV/ostree-work/rootfs/dev 2>/dev/null
+sudo rm -rf $FLIPPER_DEV/ostree-work/rootfs
+```
+
+## 10. Checklist
 
 Use this checklist to track test coverage:
 
