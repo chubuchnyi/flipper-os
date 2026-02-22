@@ -4,35 +4,35 @@
 
 ## Implementation Phases
 
-### Phase 1: OSTree Foundation (4-6 weeks)
+### Phase 1: OSTree Foundation 
 Transform Debian build scripts into OSTree-managed immutable rootfs.
 - [ ] Modified build scripts producing OSTree commits
 - [ ] Partition layout tool (boot, sysroot, data)
 - [ ] U-Boot integration with OSTree kernel params
 - [ ] Smoke test: boot from OSTree on Radxa Rock 4D
 
-### Phase 2: Profile System Core (4-6 weeks)
+### Phase 2: Profile System Core 
 Profile creation, switching, reset, clone.
 - [ ] flipper-profiled daemon
 - [ ] Custom initramfs with profile selector (text UI)
 - [ ] flipper-profile CLI tool
 - [ ] Built-in profile templates (wifi-router, desktop, sniffer)
 
-### Phase 3: Update System (3-4 weeks)
+### Phase 3: Update System 
 OTA updates for OS and firmware.
 - [ ] OSTree remote + CI/CD for publishing commits
 - [ ] flipper-updater service
 - [ ] RAUC integration for U-Boot/MCU firmware
 - [ ] Boot counter + auto-rollback
 
-### Phase 4: User Experience (3-4 weeks)
+### Phase 4: User Experience 
 Graphical boot menu, Flatpak, SD card.
 - [ ] LVGL graphical profile selector
 - [ ] Flatpak per-profile setup
 - [ ] SD card profile management
 - [ ] In-profile management UI
 
-### Phase 5: Hardening (3-4 weeks)
+### Phase 5: Hardening 
 Security, reliability, manufacturing.
 - [ ] OSTree commit signing
 - [ ] Secure Boot chain (eFuse)

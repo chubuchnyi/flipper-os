@@ -1,6 +1,6 @@
 # Flipper OS Concept (from September 2025 presentation)
 
-Source: cdn.flipper.net/flipper_os_first_concept_september2025.pdf
+Source: [cdn.flipper.net/flipper_os_first_concept_september2025.pdf](https://cdn.flipper.net/flipper_os_first_concept_september2025.pdf)
 
 ## Core Ideas
 1. Profile-based system: built-in profiles (WiFi Router, Wayland Desktop) + user profiles
