@@ -404,6 +404,7 @@ EOF
 setup_data() {
     log_info "Initializing data partition"
     mkdir -p "$DATA_MNT/profiles"
+    chmod 1777 "$DATA_MNT/profiles"
     mkdir -p "$DATA_MNT/flatpak"
     mkdir -p "$DATA_MNT/shared"
 
@@ -427,6 +428,10 @@ setup_data() {
             mkdir -p "$dest/work/etc" "$dest/work/usr" "$dest/work/var"
             # Ensure upper/ directories exist
             mkdir -p "$dest/upper/etc" "$dest/upper/usr" "$dest/upper/var"
+
+            # Fix ownership: build host UID may not exist on target
+            chown -R root:root "$dest"
+            chmod -R u+rwX,go+rX "$dest"
 
             log_info "Seeded profile: $name"
         done

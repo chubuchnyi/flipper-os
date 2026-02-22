@@ -124,7 +124,13 @@ EOF
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 main() {
-    PROFILE_NAME=$(current_profile)
+    # Read profile name from persistent storage
+    # /run/flipper-profile may not exist yet (systemd tmpfs wipes initramfs writes)
+    PROFILE_NAME=""
+    if [ -f "$LAST_PROFILE_FILE" ]; then
+        PROFILE_NAME=$(cat "$LAST_PROFILE_FILE")
+    fi
+
     if [ -z "$PROFILE_NAME" ]; then
         log_error "profiled: no current profile — exiting"
         exit 1
@@ -138,6 +144,9 @@ main() {
         exit 1
     fi
 
+    # Recreate runtime state files (lost when systemd mounts tmpfs on /run)
+    echo "$PROFILE_NAME" > "$RUN_PROFILE"
+    echo "ok" > "$RUN_STATUS"
     log_info "profiled: started for profile '$PROFILE_NAME'"
 
     # Boot-time tasks

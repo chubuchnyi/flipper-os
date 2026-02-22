@@ -237,7 +237,7 @@ cat /run/flipper-profile           # → "my-test"
 
 # Write a file — it goes to the profile's overlay, not the base OS
 echo "hello from default" > /etc/test-file
-ls /data/profiles/default/upper/etc/test-file   # → exists
+ls /data/profiles/my-test/upper/etc/test-file   # → exists
 
 # ── Built-in profile operations ──
 

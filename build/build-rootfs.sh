@@ -354,6 +354,9 @@ configure_system() {
         locale-gen
         echo "LANG=en_US.UTF-8" > /etc/default/locale
 
+        # Root password
+        echo "root:root" | chpasswd
+
         # Default user
         if ! id -u user >/dev/null 2>&1; then
             useradd -s /bin/bash -F -m user
