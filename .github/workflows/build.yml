@@ -122,6 +122,13 @@ jobs:
       - name: Show available disk space
         run: df -h
 
+      # Register ARM64 QEMU handler in the host kernel's binfmt_misc.
+      # Required for cross-arch chroot (mmdebstrap arm64 on amd64).
+      # The container's setup_binfmt only enables an already-registered handler;
+      # on a fresh runner no handler exists yet, so we need this host-level step.
+      - name: Register ARM64 binfmt handler
+        run: docker run --privileged --rm tonistiigi/binfmt --install arm64
+
       # Mount host directories so build artifacts survive container exit
       - name: Prepare output directories
         run: mkdir -p out/images out/ostree

@@ -30,6 +30,23 @@ ok()    { printf "${GREEN}[ OK ]${RESET}  %s\n" "$*"; }
 warn()  { printf "${YELLOW}[WARN]${RESET}  %s\n" "$*"; }
 err()   { printf "${RED}[ERR]${RESET}  %s\n" "$*" >&2; }
 
+print_volume_hint() {
+    err "Each 'docker run' creates a fresh container — build artifacts don't persist."
+    err ""
+    err "Option 1 — full pipeline in one command (build + test + qemu):"
+    err "  docker run --privileged -it flipper-os"
+    err ""
+    err "Option 2 — persist artifacts with volumes for separate build/qemu runs:"
+    err "  docker run --privileged -it \\"
+    err "    -v flipper-os-images:${OUT_DIR} \\"
+    err "    -v flipper-os-ostree:${FLIPPER_DEV}/ostree-work \\"
+    err "    flipper-os build"
+    err ""
+    err "  docker run --privileged -it \\"
+    err "    -v flipper-os-images:${OUT_DIR} \\"
+    err "    flipper-os qemu"
+}
+
 # ── Environment ───────────────────────────────────────────────────────────────
 
 export HOME=/root
@@ -117,7 +134,7 @@ build_all() {
 run_tests() {
     if [ ! -f "$IMAGE" ]; then
         err "Image not found: $IMAGE"
-        err "Build first with: docker run --privileged -it flipper-os build"
+        print_volume_hint
         return 1
     fi
 
@@ -160,7 +177,7 @@ run_tests() {
 launch_qemu() {
     if [ ! -f "$IMAGE" ]; then
         err "Image not found: $IMAGE"
-        err "Build first: docker run --privileged -it flipper-os build"
+        print_volume_hint
         exit 1
     fi
 

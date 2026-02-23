@@ -121,12 +121,27 @@ docker build -t flipper-os .
 
 # Full pipeline: build kernel → rootfs → image → run tests → interactive QEMU
 docker run --privileged -it flipper-os
+```
 
-# Or just launch QEMU (after a previous full run)
-docker run --privileged -it flipper-os qemu
+To run build and QEMU separately, use Docker volumes — each `docker run` creates
+a new container, so build artifacts are lost without volumes:
 
-# Drop into a shell for manual exploration
-docker run --privileged -it flipper-os shell
+```bash
+# Build only (persist the image via volume):
+docker run --privileged -it \
+  -v flipper-os-images:/root/flipper-one-dev/images \
+  -v flipper-os-ostree:/root/flipper-one-dev/ostree-work \
+  flipper-os build
+
+# Launch QEMU (reuses the image from volume):
+docker run --privileged -it \
+  -v flipper-os-images:/root/flipper-one-dev/images \
+  flipper-os qemu
+
+# Drop into a shell for manual exploration:
+docker run --privileged -it \
+  -v flipper-os-images:/root/flipper-one-dev/images \
+  flipper-os shell
 ```
 
 > **Note:** `--privileged` is required for `losetup`, `mount`, `chroot`, and `binfmt_misc`
@@ -134,11 +149,11 @@ docker run --privileged -it flipper-os shell
 >
 > If the build fails at `mmdebstrap` with binfmt errors, register ARM64 handlers on the host:
 > ```bash
-> docker run --privileged --rm tonistiigi/binfmt --install all
+> docker run --privileged --rm tonistiigi/binfmt --install arm64
 > ```
 >
 > First run takes **30-60 minutes** (kernel compilation + rootfs build). Subsequent
-> `docker run` commands detect the existing image and skip directly to QEMU.
+> runs with volumes detect the existing image and skip directly to QEMU.
 
 ### Flash to Hardware
 

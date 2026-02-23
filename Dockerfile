@@ -2,27 +2,35 @@
 #
 # Builds the complete Flipper OS image and launches QEMU for interactive testing.
 #
-# Build:
+# Build the Docker image (one-time, cached):
 #   docker build -t flipper-os .
 #
-# Run (full pipeline: build → test → interactive QEMU):
+# ── Quick start (everything in one command) ────────────────────────────────
 #   docker run --privileged -it flipper-os
+#   (builds kernel → rootfs → image → runs tests → launches QEMU)
 #
-# Run (QEMU only, requires prior build):
-#   docker run --privileged -it flipper-os qemu
+# ── Separate build / qemu / test with volumes ──────────────────────────────
+#   NOTE: Each 'docker run' creates a NEW container. Build artifacts are lost
+#   unless you mount Docker volumes. Use -v to persist images between runs:
 #
-# Run (build only, no tests/QEMU):
-#   docker run --privileged -it flipper-os build
-#
-# Run (drop into shell):
-#   docker run --privileged -it flipper-os shell
-#
-# Persist build artifacts between runs (avoids rebuilding):
-#   docker volume create flipper-os-data
+#   # Build:
 #   docker run --privileged -it \
-#     -v flipper-os-data:/root/flipper-one-dev/images \
-#     -v flipper-os-data-ostree:/root/flipper-one-dev/ostree-work \
-#     flipper-os
+#     -v flipper-os-images:/root/flipper-one-dev/images \
+#     -v flipper-os-ostree:/root/flipper-one-dev/ostree-work \
+#     flipper-os build
+#
+#   # QEMU (reuses the built image from the volume):
+#   docker run --privileged -it \
+#     -v flipper-os-images:/root/flipper-one-dev/images \
+#     flipper-os qemu
+#
+#   # Tests:
+#   docker run --privileged -it \
+#     -v flipper-os-images:/root/flipper-one-dev/images \
+#     flipper-os test
+#
+# ── Other commands ─────────────────────────────────────────────────────────
+#   docker run --privileged -it flipper-os shell   # Drop into bash
 #
 # NOTE: --privileged is required for losetup, mount, chroot, and binfmt_misc.
 
