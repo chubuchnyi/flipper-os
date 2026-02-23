@@ -60,7 +60,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     #   libelf-dev:native       → libelf-dev
     debhelper kmod libdw-dev libelf-dev \
     # Rootfs & disk image tools
-    mmdebstrap qemu-user-static binfmt-support debootstrap \
+    # arch-test: required by mmdebstrap for foreign-arch (arm64) bootstrap on amd64
+    # ghostscript: required by upstream build scripts to render the boot logo
+    mmdebstrap qemu-user-static binfmt-support debootstrap arch-test ghostscript \
     debian-archive-keyring \
     dosfstools e2fsprogs parted gdisk kpartx \
     pigz squashfs-tools \
