@@ -62,6 +62,21 @@ IMAGE="$OUT_DIR/flipper-os-${BOARD}.img"
 
 cd "$FLIPPER_DEV/flipper-os"
 
+# ── Ensure loop devices are available ──────────────────────────────────────────
+#
+# In a fresh container /dev/loop* nodes may not exist even with --privileged.
+# The build pipeline creates them implicitly, but qemu-only runs need them for
+# losetup to extract kernel/initramfs from the disk image.
+
+ensure_loop_devices() {
+    modprobe loop 2>/dev/null || true
+    if ! losetup -f &>/dev/null; then
+        for i in $(seq 0 7); do
+            [ -b "/dev/loop$i" ] || mknod "/dev/loop$i" b 7 "$i" 2>/dev/null || true
+        done
+    fi
+}
+
 # ── Setup binfmt_misc for cross-arch chroot ───────────────────────────────────
 
 setup_binfmt() {
@@ -138,6 +153,8 @@ run_tests() {
         return 1
     fi
 
+    ensure_loop_devices
+
     printf "\n${BOLD}══════════════════════════════════════════${RESET}\n"
     printf "${BOLD}  Running Automated Tests${RESET}\n"
     printf "${BOLD}══════════════════════════════════════════${RESET}\n\n"
@@ -182,6 +199,7 @@ launch_qemu() {
     fi
 
     info "Extracting boot files from image..."
+    ensure_loop_devices
 
     local work_dir
     work_dir=$(mktemp -d /tmp/flipper-qemu.XXXXXX)
@@ -190,24 +208,27 @@ launch_qemu() {
 
     mkdir -p "$work_dir/boot"
 
-    # Setup loop device and mount boot partition (p1)
-    local loop_dev
-    loop_dev=$(losetup -fP --show "$IMAGE")
-    udevadm settle --timeout=5 2>/dev/null || sleep 1
+    # Extract boot partition (p1) to a temp file, then mount it.
+    # This avoids losetup partition nodes (unreliable in Docker) and
+    # "overlapping loop device" errors from stale host-level loop devices
+    # that persist across container runs on Docker volumes.
+    local p1_start p1_sectors
+    p1_start=$(partx --show -n 1 -g -o START "$IMAGE" 2>/dev/null | tr -d ' ')
+    p1_sectors=$(partx --show -n 1 -g -o SECTORS "$IMAGE" 2>/dev/null | tr -d ' ')
 
-    if [ ! -b "${loop_dev}p1" ]; then
-        losetup -d "$loop_dev" 2>/dev/null || true
-        err "Boot partition not found: ${loop_dev}p1"
+    if [ -z "$p1_start" ] || [ -z "$p1_sectors" ]; then
+        err "Cannot read boot partition offset from: $IMAGE"
         exit 1
     fi
 
-    mount -o ro "${loop_dev}p1" "$work_dir/boot"
+    dd if="$IMAGE" of="$work_dir/boot.img" \
+        bs=512 skip="$p1_start" count="$p1_sectors" status=none 2>/dev/null
+    mount -o ro,loop "$work_dir/boot.img" "$work_dir/boot"
 
     # Parse extlinux.conf for kernel, initrd, and boot args
     local extlinux="$work_dir/boot/extlinux/extlinux.conf"
     if [ ! -f "$extlinux" ]; then
         umount "$work_dir/boot" 2>/dev/null || true
-        losetup -d "$loop_dev" 2>/dev/null || true
         err "extlinux.conf not found in boot partition"
         exit 1
     fi
@@ -219,7 +240,6 @@ launch_qemu() {
 
     if [ -z "$linux_path" ]; then
         umount "$work_dir/boot" 2>/dev/null || true
-        losetup -d "$loop_dev" 2>/dev/null || true
         err "No kernel path found in extlinux.conf"
         exit 1
     fi
@@ -238,9 +258,8 @@ launch_qemu() {
     fi
     boot_args=$(echo "$boot_args" | tr -s ' ')
 
-    # Release the loop device before launching QEMU
+    # Release boot partition mount before launching QEMU
     umount "$work_dir/boot"
-    losetup -d "$loop_dev"
     # shellcheck disable=SC2064
     trap "rm -rf '$work_dir'" EXIT
 

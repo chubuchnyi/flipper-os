@@ -89,6 +89,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     udev file cpio \
     && rm -rf /var/lib/apt/lists/*
 
+# ipxe-qemu provides efi-virtio.rom required by QEMU for virtio-pci devices.
+# It's a Recommends of qemu-system-arm, skipped by --no-install-recommends above.
+RUN apt-get update && apt-get install -y --no-install-recommends ipxe-qemu \
+    && rm -rf /var/lib/apt/lists/*
+
 # dpkg-buildpackage wrapper: add -d to skip build-dep check for cross-builds.
 #
 # `make bindeb-pkg` calls `dpkg-buildpackage -a arm64` which then runs
