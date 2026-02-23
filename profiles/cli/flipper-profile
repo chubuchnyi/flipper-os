@@ -144,9 +144,14 @@ cmd_create() {
         die "Profile already exists: $name"
     fi
 
+    # Check write permissions
+    if [ ! -w "$PROFILES_DIR" ]; then
+        die "Permission denied: $PROFILES_DIR is not writable. Run with sudo."
+    fi
+
     local tmp_dir="$PROFILES_DIR/.tmp-create-$$-$name"
     # Clean up on failure
-    trap 'rm -rf "$tmp_dir"' EXIT
+    trap 'rm -rf "${tmp_dir:-}"' EXIT
 
     if [ -n "$from_template" ]; then
         # Create from template
@@ -202,8 +207,12 @@ cmd_clone() {
         die "Destination profile already exists: $dst"
     fi
 
+    if [ ! -w "$PROFILES_DIR" ]; then
+        die "Permission denied: $PROFILES_DIR is not writable. Run with sudo."
+    fi
+
     local tmp_dir="$PROFILES_DIR/.tmp-clone-$$-$dst"
-    trap 'rm -rf "$tmp_dir"' EXIT
+    trap 'rm -rf "${tmp_dir:-}"' EXIT
 
     # Copy upper/ from source
     mkdir -p "$tmp_dir"
@@ -249,6 +258,10 @@ cmd_delete() {
         die "Cannot delete the active profile. Switch to another profile first."
     fi
 
+    if [ ! -w "$PROFILES_DIR" ]; then
+        die "Permission denied: $PROFILES_DIR is not writable. Run with sudo."
+    fi
+
     # Atomic delete: move to temp, then remove
     local tmp_dir="$PROFILES_DIR/.tmp-delete-$$-$name"
     mv "$PROFILES_DIR/$name" "$tmp_dir"
@@ -287,6 +300,10 @@ cmd_reset() {
         die "Template not found for reset: $tmpl_dir"
     fi
 
+    if [ ! -w "$PROFILES_DIR" ]; then
+        die "Permission denied: $PROFILES_DIR is not writable. Run with sudo."
+    fi
+
     # Atomic reset: move old out, copy template in, move new in, remove old
     local old_dir="$PROFILES_DIR/.tmp-reset-old-$$-$name"
     local new_dir="$PROFILES_DIR/.tmp-reset-new-$$-$name"
@@ -313,6 +330,10 @@ cmd_switch() {
 
     if ! profile_exists "$name"; then
         die "Profile not found: $name"
+    fi
+
+    if [ ! -w "$DATA_DIR" ]; then
+        die "Permission denied: $DATA_DIR is not writable. Run with sudo."
     fi
 
     atomic_write "$NEXT_PROFILE_FILE" "$name"
@@ -343,6 +364,10 @@ cmd_rename() {
     cur=$(current_profile)
     if [ "$old" = "$cur" ]; then
         die "Cannot rename the active profile. Switch to another profile first."
+    fi
+
+    if [ ! -w "$PROFILES_DIR" ]; then
+        die "Permission denied: $PROFILES_DIR is not writable. Run with sudo."
     fi
 
     mv "$PROFILES_DIR/$old" "$PROFILES_DIR/$new"

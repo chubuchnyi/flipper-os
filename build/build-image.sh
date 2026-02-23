@@ -133,6 +133,7 @@ cleanup() {
     done
 
     if [ -n "${LOOP_DEV:-}" ]; then
+        kpartx -dv "$LOOP_DEV" 2>/dev/null || true
         losetup -d "$LOOP_DEV" 2>/dev/null || true
     fi
 
@@ -177,8 +178,23 @@ setup_loop() {
     LOOP_DEV=$(losetup -fP --show "$IMG_FILE")
     log_info "Loop device: $LOOP_DEV"
 
-    # Wait for partition devices to appear
+    # Wait for partition devices to appear (udevd may need a moment)
     udevadm settle --timeout=5 2>/dev/null || sleep 1
+
+    if [ ! -b "${LOOP_DEV}p1" ]; then
+        # In Docker containers without udevd, losetup -P does not create
+        # /dev/loopNpX nodes. kpartx uses device-mapper and reliably creates
+        # /dev/mapper/loopNpX. Symlink them to the expected paths so the rest
+        # of the script works unchanged.
+        local loop_name
+        loop_name=$(basename "$LOOP_DEV")
+        log_info "Partition nodes missing — using kpartx fallback"
+        kpartx -av "$LOOP_DEV" >/dev/null
+        for p in 1 2 3; do
+            ln -sf "/dev/mapper/${loop_name}p${p}" "${LOOP_DEV}p${p}" 2>/dev/null || true
+        done
+        sleep 1
+    fi
 
     if [ ! -b "${LOOP_DEV}p1" ]; then
         die "Partition devices did not appear (${LOOP_DEV}p1 missing)"
@@ -404,6 +420,7 @@ EOF
 setup_data() {
     log_info "Initializing data partition"
     mkdir -p "$DATA_MNT/profiles"
+    chmod 1777 "$DATA_MNT/profiles"
     mkdir -p "$DATA_MNT/flatpak"
     mkdir -p "$DATA_MNT/shared"
 
@@ -427,6 +444,10 @@ setup_data() {
             mkdir -p "$dest/work/etc" "$dest/work/usr" "$dest/work/var"
             # Ensure upper/ directories exist
             mkdir -p "$dest/upper/etc" "$dest/upper/usr" "$dest/upper/var"
+
+            # Fix ownership: build host UID may not exist on target
+            chown -R root:root "$dest"
+            chmod -R u+rwX,go+rX "$dest"
 
             log_info "Seeded profile: $name"
         done

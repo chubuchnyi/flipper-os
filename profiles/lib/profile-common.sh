@@ -76,6 +76,9 @@ profile_template() {
 current_profile() {
     if [ -f "$RUN_PROFILE" ]; then
         cat "$RUN_PROFILE"
+    elif [ -f "$LAST_PROFILE_FILE" ]; then
+        # Fallback: /run/flipper-profile may not exist yet (profiled hasn't started)
+        cat "$LAST_PROFILE_FILE"
     else
         echo ""
     fi
@@ -136,7 +139,7 @@ profile_size_bytes() {
     local name="$1"
     local upper="$PROFILES_DIR/$name/upper"
     if [ -d "$upper" ]; then
-        du -sb "$upper" 2>/dev/null | cut -f1
+        du -sb "$upper" 2>/dev/null | cut -f1 || echo "0"
     else
         echo "0"
     fi
@@ -144,12 +147,13 @@ profile_size_bytes() {
 
 # human_size <bytes> — convert bytes to human-readable (KB/MB/GB)
 human_size() {
-    local bytes="$1"
-    if [ "$bytes" -ge 1073741824 ]; then
+    local bytes="${1:-0}"
+    bytes="${bytes:-0}"
+    if [ "$bytes" -ge 1073741824 ] 2>/dev/null; then
         echo "$(( bytes / 1073741824 ))GB"
-    elif [ "$bytes" -ge 1048576 ]; then
+    elif [ "$bytes" -ge 1048576 ] 2>/dev/null; then
         echo "$(( bytes / 1048576 ))MB"
-    elif [ "$bytes" -ge 1024 ]; then
+    elif [ "$bytes" -ge 1024 ] 2>/dev/null; then
         echo "$(( bytes / 1024 ))KB"
     else
         echo "${bytes}B"

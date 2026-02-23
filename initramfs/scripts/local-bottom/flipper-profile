@@ -156,6 +156,7 @@ seed_templates() {
 
     log_msg "first boot: seeding profiles from templates"
     mkdir -p "$PROFILES_DIR"
+    chmod 1777 "$PROFILES_DIR"
 
     for tmpl in "$TEMPLATES_DIR"/*/; do
         [ -d "$tmpl" ] || continue
