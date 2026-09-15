@@ -107,13 +107,13 @@ RUN printf '#!/bin/sh\nexec /usr/bin/dpkg-buildpackage -d "$@"\n' \
     > /usr/local/bin/dpkg-buildpackage \
     && chmod +x /usr/local/bin/dpkg-buildpackage
 
-RUN wget https://imagemagick.org/archive/ImageMagick.tar.gz \
-    && tar xvf ImageMagick.tar.gz \ 
-    && cd ImageMagick-7* \ 
-    && ./configure \ 
-    && make -j$(nproc) \ 
-    && sudo make install \ 
-    && sudo ldconfig \ 
+RUN wget -O ImageMagick.tar.gz https://github.com/ImageMagick/ImageMagick/archive/refs/tags/7.1.2-31.tar.gz \
+    && tar xvf ImageMagick.tar.gz \
+    && cd ImageMagick-7* \
+    && ./configure \
+    && make -j$(nproc) \
+    && sudo make install \
+    && sudo ldconfig \
     && cd .. && rm -rf ImageMagick*
 
 # ── 2. Rust toolchain + zeekstd ──────────────────────────────────────────────
